@@ -1463,6 +1463,10 @@ export class EventController {
 		// leaving "Working…" gone while the agent keeps running. The live turn owns
 		// the loader and finalizes it at its own agent_end (isStreaming === false by
 		// then). Mirrors the collab guest's !isStreaming loader reconciler.
+		// A non-terminal settle is only a scheduling pause while async work will
+		// re-wake the loop. Keep the working title and loader alive until the
+		// eventual terminal agent_end.
+		if (event.isTerminal === false) return;
 		if (this.ctx.session.isStreaming) return;
 		setTerminalTitleState("idle");
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept the terminal-title spinner and working loader active while Vibe workers or other asynchronous jobs will re-wake the session, instead of showing the tab as idle during a non-terminal scheduling pause ([#7386](https://github.com/can1357/oh-my-pi/issues/7386)).
+
 ## [17.2.4] - 2026-08-01
 
 ### Added

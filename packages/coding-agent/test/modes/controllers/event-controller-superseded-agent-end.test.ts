@@ -52,6 +52,11 @@ function createContext() {
 
 const AGENT_START = { type: "agent_start" } as unknown as AgentSessionEvent;
 const AGENT_END = { type: "agent_end", messages: [] } as unknown as AgentSessionEvent;
+const NON_TERMINAL_AGENT_END = {
+	type: "agent_end",
+	messages: [],
+	isTerminal: false,
+} as unknown as AgentSessionEvent;
 
 describe("EventController superseded agent_end", () => {
 	beforeAll(async () => {
@@ -88,6 +93,24 @@ describe("EventController superseded agent_end", () => {
 		// already streaming the resumed turn, it must not tear down the live loader —
 		// otherwise "Working…" vanishes while the agent keeps running.
 		await controller.handleEvent(AGENT_END);
+
+		expect(loader.stop).not.toHaveBeenCalled();
+		expect(ctx.loadingAnimation).toBeDefined();
+		expect(TERMINAL.sendNotification).not.toHaveBeenCalled();
+	});
+
+	it("keeps the loader alive across a non-terminal async scheduling pause", async () => {
+		const { ctx, streamState, loader } = createContext();
+		const controller = new EventController(ctx);
+
+		await controller.handleEvent(AGENT_START);
+		expect(ctx.loadingAnimation).toBeDefined();
+
+		// The parent turn has stopped streaming, but an unsuppressed async delivery
+		// will re-wake it. This settle must remain visibly active until the later,
+		// terminal agent_end performs the teardown.
+		streamState.isStreaming = false;
+		await controller.handleEvent(NON_TERMINAL_AGENT_END);
 
 		expect(loader.stop).not.toHaveBeenCalled();
 		expect(ctx.loadingAnimation).toBeDefined();
