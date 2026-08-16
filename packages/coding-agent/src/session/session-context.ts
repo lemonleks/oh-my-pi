@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { coerceServiceTierByFamily, type ProviderPayload, type ServiceTierByFamily } from "@oh-my-pi/pi-ai";
 import * as snapcompact from "@oh-my-pi/snapcompact";
+import { isBlobRef } from "./blob-store";
 import {
 	createBranchSummaryMessage,
 	createCompactionSummaryMessage,
@@ -129,6 +130,13 @@ export interface BuildSessionContextOptions {
 	 * hides the call the agent is still waiting on.
 	 */
 	keepDanglingToolCalls?: boolean;
+	/**
+	 * Turn a persisted snapcompact frame payload back into image bytes. Frames
+	 * live in the blob store, so only the archive a rebuilt context actually
+	 * injects is resolved — superseded archives stay as references and cost
+	 * nothing to keep around.
+	 */
+	resolveFrameData?: (data: string) => string;
 }
 
 /**
@@ -153,6 +161,33 @@ function snapcompactHistoryBlocksForContext(
 	if (!archive) return undefined;
 	if (options?.transcript && options.collapseCompactedHistory) return undefined;
 	return snapcompact.historyBlocks(archive, snapcompactHistoryBlockOptions(archive, options));
+}
+
+/**
+ * Resolve the frame payloads of the one archive this context injects. A frame
+ * whose blob has gone missing resolves back to its own reference; drop it rather
+ * than hand a `blob:sha256:…` string to a provider as if it were an image.
+ */
+function resolveArchiveFrames(
+	archive: snapcompact.Archive | undefined,
+	options: BuildSessionContextOptions | undefined,
+): snapcompact.Archive | undefined {
+	const resolve = options?.resolveFrameData;
+	if (!archive || !resolve || archive.frames.length === 0) return archive;
+
+	let changed = false;
+	const frames: snapcompact.Frame[] = [];
+	for (const frame of archive.frames) {
+		if (!isBlobRef(frame.data)) {
+			frames.push(frame);
+			continue;
+		}
+		changed = true;
+		const data = resolve(frame.data);
+		if (isBlobRef(data)) continue;
+		frames.push({ ...frame, data });
+	}
+	return changed ? { ...archive, frames } : archive;
 }
 
 export function getOpenAiRemoteCompactionPayload(
@@ -366,7 +401,9 @@ export function buildSessionContext(
 			handleEntryResetTracking(entry);
 			if (entry.type === "compaction") {
 				const active = entry.id === compaction?.id;
-				const snapcompactArchive = active ? snapcompact.getPreservedArchive(entry.preserveData) : undefined;
+				const snapcompactArchive = active
+					? resolveArchiveFrames(snapcompact.getPreservedArchive(entry.preserveData), options)
+					: undefined;
 				pushMessage(
 					createCompactionSummaryMessage(
 						active ? entry.summary : SUPERSEDED_COMPACTION_SUMMARY,
@@ -409,7 +446,10 @@ export function buildSessionContext(
 
 		// Re-attach any archived snapcompact frames so the model can keep
 		// reading the archived history after every context rebuild.
-		const snapcompactArchive = snapcompact.getPreservedArchive(compaction.preserveData);
+		const snapcompactArchive = resolveArchiveFrames(
+			snapcompact.getPreservedArchive(compaction.preserveData),
+			options,
+		);
 		const compactionSummaryMsg = createCompactionSummaryMessage(
 			compaction.summary,
 			compaction.tokensBefore,

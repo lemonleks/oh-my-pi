@@ -89,6 +89,9 @@
 ### Fixed
 
 - Fixed `omp stats` and `/stats` dashboards being unreachable from container hosts by accepting an explicit `--host` bind address while preserving the `127.0.0.1` default.
+### Changed
+
+- Snapcompact frame archives now persist as blob references instead of inline base64, so a resumed session no longer materializes the frames of every past compaction; only the archive the rebuilt context injects is resolved back to image bytes. On a 171.7 MiB journal with 30k entries: journal 130.9 MiB (-24%), retained JSC heap 642.9 -> 479.9 MiB (-25%), resume 564 -> 374 ms (-34%), and identical frames across compactions now share one content-addressed blob (40.8 MiB of frames stored as 19.8 MiB). Journals written before this change keep working and convert on their next full rewrite.
 
 ## [17.3.5] - 2026-08-16
 

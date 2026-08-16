@@ -1,4 +1,5 @@
 import { isAnthropicServerToolHistoryBlock } from "@oh-my-pi/pi-ai/providers/anthropic-wire";
+import { PRESERVE_KEY as SNAPCOMPACT_PRESERVE_KEY } from "@oh-my-pi/snapcompact";
 import {
 	type BlobStore,
 	externalizeImageDataSync,
@@ -60,6 +61,33 @@ function shouldExternalizeImagePayload(
 	return (key === TEXT_CONTENT_KEY && isImageBlock(value)) || key === "images";
 }
 
+/**
+ * Rendered snapcompact frames are the heaviest thing a session persists: every
+ * compaction archives its own set of base64 PNGs, and a long-lived journal ends
+ * up carrying (and re-parsing on every resume) tens of megabytes that only the
+ * newest archive on the active path is ever asked for.
+ *
+ * They are image payloads like any other, so they belong in the blob store. Only
+ * the archive slot under `preserveData` is recognized here; arbitrary
+ * extension-provided `frames` keep persisting inline, because nothing would know
+ * to resolve them back.
+ */
+function externalizeSnapcompactFrames(archive: object, blobStore: BlobStore): object {
+	if (!("frames" in archive)) return archive;
+	const frames = archive.frames;
+	if (!Array.isArray(frames)) return archive;
+
+	let changed = false;
+	const externalized = frames.map(frame => {
+		if (!isImageDataPayload(frame) || isBlobRef(frame.data) || frame.data.length < BLOB_EXTERNALIZE_THRESHOLD) {
+			return frame;
+		}
+		changed = true;
+		return { ...frame, data: externalizeImageDataSync(blobStore, frame.data, frame.mimeType) };
+	});
+	return changed ? { ...archive, frames: externalized } : archive;
+}
+
 /** True for a non-empty string — marks signature/encrypted fields whose block must persist verbatim. */
 function isNonEmptyString(value: unknown): value is string {
 	return typeof value === "string" && value.length > 0;
@@ -93,6 +121,12 @@ function truncateForPersistence(obj: unknown, blobStore: BlobStore, key?: string
 	}
 	if (shouldExternalizeImagePayload(obj, key)) {
 		return { ...obj, data: externalizeImageDataSync(blobStore, obj.data, obj.mimeType) };
+	}
+	if (key === SNAPCOMPACT_PRESERVE_KEY && typeof obj === "object") {
+		const externalized = externalizeSnapcompactFrames(obj, blobStore);
+		// Re-enter without the archive key so the rest of the archive (source text)
+		// still goes through the normal truncation walk exactly once.
+		if (externalized !== obj) return truncateForPersistence(externalized, blobStore);
 	}
 	// Signed content is bound to its exact bytes: a truncated `thinking`/`text`/
 	// `arguments` no longer matches its signature and a truncated

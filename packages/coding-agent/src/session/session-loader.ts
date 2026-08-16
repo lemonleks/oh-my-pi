@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import { getBlobsDir, isEnoent, parseJsonlLenient } from "@oh-my-pi/pi-utils";
-import { BlobStore, isBlobRef, resolveImageData, resolveImageDataUrl } from "./blob-store";
+import { BlobStore, isBlobRef, resolveImageData, resolveImageDataSync, resolveImageDataUrl } from "./blob-store";
 import { buildSessionContext } from "./session-context";
 import type { FileEntry, RawFileEntry, SessionEntry, SessionHeader } from "./session-entries";
 import { migrateToCurrentVersion } from "./session-migrations";
@@ -395,10 +395,12 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
 	const entries = await loadEntriesFromFile(filePath);
 	if (entries.length === 0) return [];
 	migrateToCurrentVersion(entries);
-	await resolveBlobRefsInEntries(entries, new BlobStore(getBlobsDir()));
+	const blobs = new BlobStore(getBlobsDir());
+	await resolveBlobRefsInEntries(entries, blobs);
 	const sessionEntries = entries.filter((e): e is SessionEntry => e.type !== "session");
 	return buildSessionContext(sessionEntries, undefined, undefined, {
 		transcript: true,
 		collapseCompactedHistory: true,
+		resolveFrameData: data => resolveImageDataSync(blobs, data),
 	}).messages;
 }

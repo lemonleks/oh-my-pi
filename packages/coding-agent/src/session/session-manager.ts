@@ -20,7 +20,7 @@ import {
 } from "@oh-my-pi/pi-utils";
 import type { StructuredSubagentSchemaMode } from "../task/types";
 import { ArtifactManager } from "./artifacts";
-import { type BlobPutOptions, type BlobPutResult, BlobStore } from "./blob-store";
+import { type BlobPutOptions, type BlobPutResult, BlobStore, resolveImageDataSync } from "./blob-store";
 import {
 	type BashExecutionMessage,
 	type CustomMessage,
@@ -2430,7 +2430,12 @@ export class SessionManager {
 	 * the full-history display transcript, from the current leaf path.
 	 */
 	buildSessionContext(options?: BuildSessionContextOptions): SessionContext {
-		return buildSessionContext(this.#entries, this.#index.leafId(), this.#index.entriesById(), options);
+		return buildSessionContext(this.#entries, this.#index.leafId(), this.#index.entriesById(), {
+			// Snapcompact frames persist as blob refs; only the archive this context
+			// injects is turned back into image bytes.
+			resolveFrameData: data => resolveImageDataSync(this.#blobs, data),
+			...options,
+		});
 	}
 
 	/** Strip stale OpenAI Responses assistant replay metadata from loaded entries. */
